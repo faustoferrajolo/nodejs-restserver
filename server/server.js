@@ -4,21 +4,20 @@
 require('./config/config');
 //require
 
-const express = require('express')
+const express = require('express');
 const mongoose = require('mongoose');
 
-const app = express()
+const app = express();
 const bodyParser = require('body-parser');
 
 // parse application/x-www-form-urlencoded
-app.use(bodyParser.urlencoded({ extended: false }))
+app.use(bodyParser.urlencoded({ extended: false }));
 
 // parse application/json
-app.use(bodyParser.json())
+app.use(bodyParser.json());
 
 
-app.use(require('./routes/usuario'));
-
+app.use(require('./routes/index'));
 
 
 // VERSIÓN ORIGINAL, FUNCIONA PERO DA ERROR DE DEPRECATED
@@ -92,5 +91,5 @@ const connectDb = async() => {
 
 app.listen(process.env.PORT, () => {
     console.log('Listening on port ' + process.env.PORT);
-    console.log('Environment : ' + process.env.URLDB);
+    //console.log('Environment : ' + process.env.URLDB);
 })

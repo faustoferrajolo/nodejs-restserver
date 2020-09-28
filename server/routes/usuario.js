@@ -1,18 +1,14 @@
 const express = require('express');
-const Usuario = require('../models/usuario');
 const bcrypt = require('bcrypt');
 const _ = require('underscore');
+
+const Usuario = require('../models/usuario');
+const { verificaToken, verificaAdmin_Role } = require('../middlewares/autentication');
 
 const app = express();
 
 
-app.get('/usuario', function(req, res) {
-
-    /*     if (Number(req.query.desde)) {
-            let desde = req.query.desde
-        } else {
-            desde = 0;
-        } */
+app.get('/usuario', verificaToken, (req, res) => {
 
     let desde = req.query.desde || 0;
     desde = Number(desde);
@@ -47,7 +43,7 @@ app.get('/usuario', function(req, res) {
 });
 
 
-app.post('/usuario', function(req, res) {
+app.post('/usuario', [verificaToken, verificaAdmin_Role], (req, res) => {
 
     let body = req.body;
 
@@ -68,7 +64,7 @@ app.post('/usuario', function(req, res) {
             });
         }
 
-        res.json({
+        return res.json({
             ok: true,
             usuario: usuarioDB
         })
@@ -78,7 +74,7 @@ app.post('/usuario', function(req, res) {
 });
 
 
-app.put('/usuario/:id', function(req, res) {
+app.put('/usuario/:id', [verificaToken, verificaAdmin_Role], (req, res) => {
 
     let id = req.params.id;
     let body = _.pick(req.body, ['nombre', 'email', 'img', 'role', 'status']);
@@ -104,48 +100,19 @@ app.put('/usuario/:id', function(req, res) {
 
 
 });
-app.delete('/usuario/:id', function(req, res) {
+app.delete('/usuario/:id', [verificaToken, verificaAdmin_Role], (req, res) => {
 
     let id = req.params.id;
     let body = _.pick(req.body, ['status']);
 
-    // Funciona, borra físicamente a un usuario de la base
-    /*     Usuario.findByIdAndRemove(id, (err, usuarioDB) => {
-            if (err) {
-                return res.status(400).json({
-                    ok: false,
-                    mensaje: 'El dato no se pudo borrar',
-                    err
-                });
-            }
-
-            if (!usuarioDB) {
-                return res.status(400).json({
-                    ok: false,
-                    mensaje: 'El usuario no existe en la base'
-                });
-            }
-
-            res.json({
-                ok: true,
-                usuario: usuarioDB
-            })
-
-        }); */
 
     Usuario.findByIdAndUpdate(id, { status: false }, { new: true }, (err, usuarioDB) => {
 
-        if (err) {
-            return res.status(400).json({
-                ok: false,
-                mensaje: 'El usuario no existe en la base (1)',
-                err
-            });
-        }
+
         if (!usuarioDB) {
             return res.status(400).json({
                 ok: false,
-                mensaje: 'El usuario no existe en la base (2)'
+                mensaje: 'El usuario no existe en la base'
             });
         }
 
