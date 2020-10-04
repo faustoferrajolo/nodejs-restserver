@@ -26,6 +26,13 @@ if (process.env.NODE_ENV === 'dev') {
 
 process.env.URLDB = urlDB;
 
+
+// Google Client ID
+
+process.env.CLIENT_ID = process.env.CLIENT_ID || '1080061552521-e3k1h3uvso18tcludl9lfh7shl9bv53o.apps.googleusercontent.com';
+
+
+
 /* 
 const connectDB = async() => {
     await mongoose.connect(urlDB, {
