@@ -1,0 +1,253 @@
+def isSnapshot=true;
+def artifactoryPath = "/libs-snapshot"
+def artifactVersion;
+
+def ADDRESS;
+def NAME;
+def BITBUCKET_PATH
+def artifactId
+def artifactGroup
+def TOMCAT_NAME
+
+def DATABASE_USER;
+def DATABASE_PASSWORD;
+def DATABASE_URL;
+
+pipeline{
+    //agent any
+    agent { node { label 'CDServer' } }
+    /*triggers {
+        pollSCM'''TZ=America/Argentina/Buenos_Aires
+        H 20 * * *'''
+    }*/
+     parameters {
+                choice(name: 'AMBIENTE', 
+                choices: ['Seleccione un Ambiente', 'CEL-1', 'CEL-2', 'CEL-3', 'CEL-4', 'CEL-5', 'CEL-6', 'CEL-7', 'TREN'],
+                description: 'Seleccione la célula para la cual desplegar los scripts de DB (la última versión en desarrollo que esté disponible')
+
+                choice(name: 'COMPONENTE',
+                choices: ['Seleccione un componente', 'Notificaciones'],
+                description: 'Seleccione un componente a desplegar en el ambiente de célula.')
+    }
+    
+    stages{
+        stage("Prepare environment variables"){
+            steps{
+                 script{
+                    
+                    switch("${params.AMBIENTE}") {
+                      case "CEL-1":
+                        ADDRESS="${env.IP_CEL_1}"
+                        NAME="${env.NAME_CEL_1}"
+                        
+                        DATABASE_URL = "${env.DB_URL_CEL1}";
+                        DATABASE_USER = "${env.DB_USER_CEL1}";
+                        DATABASE_PASSWORD = "${env.DB_PASS_CEL1}";	
+                        
+                        break
+
+                      case "CEL-2":
+                        ADDRESS="${env.IP_CEL_2}"
+                        NAME="${env.NAME_CEL_2}"
+                        break
+                    
+                      case "CEL-3":
+                        ADDRESS="${env.IP_CEL_3}"
+                        NAME="${env.NAME_CEL_3}"
+                        break
+                    
+                      case "CEL-4":
+                        ADDRESS="${env.IP_CEL_4}"
+                        NAME="${env.NAME_CEL_4}"
+                        break
+                    
+                      case "CEL-5":
+                        ADDRESS="${env.IP_CEL_5}"
+                        NAME="${env.NAME_CEL_5}"
+                        break
+                    
+                      case "CEL-6":
+                        ADDRESS="${env.IP_CEL_6}"
+                        NAME="${env.NAME_CEL_6}"
+                        break
+                    
+                      case "CEL-7":
+                        ADDRESS="${env.IP_CEL_7}"
+                        NAME="${env.NAME_CEL_7}"
+                        
+                        DATABASE_URL = "${env.DB_URL_CEL7}";
+                        DATABASE_USER = "${env.DB_USER_CEL7}";
+                        DATABASE_PASSWORD = "${env.DB_PASS_CEL7}";	
+                        
+                        break
+                        
+                      case "TREN":
+                        ADDRESS="${env.IP_TRAIN}"
+                        NAME="release-train"
+                        isSnapshot=false;
+                        artifactoryPath = "/libs-release"
+                        
+                        DATABASE_URL = "${env.DB_URL_TRAIN}";
+                        DATABASE_USER = "${env.DB_USER_TRAIN}";
+                        DATABASE_PASSWORD = "${env.DB_PASS_TRAIN}";	
+
+                        break
+                        
+                    };
+                    
+                    
+                    switch("${params.COMPONENTE}") {
+                        
+                      case 'Notificaciones':
+                          BITBUCKET_PATH="notificaciones";
+                          artifactId="notificaciones";
+                          artifactGroup="coop.tecso.notificaciones";
+                          TOMCAT_NAME="rrhh";
+                          break;
+                    }
+                 }
+            }
+        }
+        
+        stage("Preparing GIT repository"){
+            steps{
+                script{
+                    def repsonse = sh(script: "curl -X POST -u '${env.BITBUCKET_USER_KEY}:${env.BITBUCKET_USER_SECRET}' https://bitbucket.org/site/oauth2/access_token -d grant_type=client_credentials", returnStdout: true).trim()
+                    def jsonObjResponse = readJSON text: repsonse
+                    def accessToken = jsonObjResponse.access_token
+                    
+                    try{
+                        sh 'git init'
+                        sh "git remote add origin https://x-token-auth:${accessToken}@bitbucket.org/riouruguay/${BITBUCKET_PATH}/"
+                        sh 'echo "======== GIT successfully initiated ========"'
+                    }catch (err){
+                        sh 'echo "======== GIt is already configured========"'
+                        sh " git remote set-url origin https://x-token-auth:${accessToken}@bitbucket.org/riouruguay/${BITBUCKET_PATH}/"
+                    }
+                    
+                    sh 'git tag -d $(git tag -l)'
+                    
+                    sh 'git fetch --tags'
+                }
+            }
+        }
+        
+        stage("Calculating version to deploy"){
+             steps{
+                script{
+                   artifactVersion = setArtifactVersion isSnapshot;
+                   sh " echo artifact version to deploy: ${artifactVersion}"
+                }
+             }
+        }
+        
+        stage("Downloading DB migrations artifact"){
+             agent {
+                docker {
+                   reuseNode true
+                    image 'maven:3.6.2'
+
+                   //para agent cd server
+                   args '-v /home/blue/jenkins/.sonar:/var/maven/.sonar -v /home/blue/jenkins/.m2:/var/maven/.m2 -ti -u 1000 -e MAVEN_CONFIG=/var/maven/.m2 -e MAVEN_OPTS="-Xmx2048m -Xms1024m" -e JAVA_OPTS="-Xms1024m -Xmx2048m"'
+                   
+                   // para agent any
+                   //args '--dns 8.8.8.8 -v /home/leandro.martin/jenkins/cacerts:/opt/ibm/java/jre/lib/security/cacerts -v /home/leandro.martin/jenkins/.sonar:/var/maven/.sonar -v /home/leandro.martin/jenkins/.m2:/var/maven/.m2 -ti -u 1014 -e MAVEN_CONFIG=/var/maven/.m2 -e MAVEN_OPTS="-Xmx2048m -Xms1024m" -e JAVA_OPTS="-Xms1024m -Xmx2048m"'
+                }
+                
+            }
+            steps{
+                script{
+                    sh "mvn dependency:get -DrepoUrl=http://artifactory2.rus.com.ar/artifactory${artifactoryPath} -Dartifact=${artifactGroup}:${artifactId}-db:${artifactVersion}:jar -Dtransitive=true -Ddest=${artifactId}-db.jar"
+                   
+                    sh "rm -Rf ${artifactId}-liquibase"
+                     sh "jar xf ./${artifactId}-db.jar"
+                  
+                    //sh "cp /var/maven/.m2/repository/com/ibm/informix/jdbc/4.50.1/jdbc-4.50.1.jar ."
+                    //sh "cp /var/maven/.m2/repository/ch/qos/logback/logback-classic/1.2.3/logback-classic-1.2.3.jar ."
+                    //sh "cp /var/maven/.m2/repository/ch/qos/logback/logback-core/1.2.3/logback-core-1.2.3.jar ."
+                    //sh "cp /var/maven/.m2/repository/org/slf4j/slf4j-api/1.7.29/slf4j-api-1.7.29.jar ."
+                   
+                    // Se reemplaza el Cp por las descarga de los jar, para evitar errores cuando no existen las librerias en el .m2   
+                    sh 'mvn dependency:get -DrepoUrl=http://artifactory2.rus.com.ar/artifactory/jcenter -Dartifact=com/ibm/informix/:jdbc:4.50.1:jar -Dtransitive=true -Ddest=jdbc-4.50.1.jar'
+                    sh 'mvn dependency:get -DrepoUrl=http://artifactory2.rus.com.ar/artifactory/jcenter -Dartifact=ch/qos/logback/:logback-classic:1.2.3:jar -Dtransitive=true -Ddest=logback-classic-1.2.3.jar' 
+                    sh 'mvn dependency:get -DrepoUrl=http://artifactory2.rus.com.ar/artifactory/jcenter -Dartifact=ch/qos/logback/:logback-core:1.2.3:jar -Dtransitive=true -Ddest=logback-core-1.2.3.jar'                   
+                    sh 'mvn dependency:get -DrepoUrl=http://artifactory2.rus.com.ar/artifactory/jcenter -Dartifact=org/slf4j:slf4j-api:1.7.29:jar -Dtransitive=true -Ddest=slf4j-api-1.7.29.jar' 
+                }
+            }
+        }
+        
+        stage("Applying DB migrations"){
+             agent {
+                docker {
+                   reuseNode true
+                    image 'liquibase/liquibase'
+                     // args '-u 0 -v ${WORKSPACE}:/liquibase/lib -v ${WORKSPACE}/liquibase/changelogs:/liquibase/changelog --entrypoint=\'\''
+                     args '-u 0 '
+                }
+                
+            }
+            
+            steps{
+                script{
+                   //sh "cp ./*.jar /liquibase/lib" //por algún motivo no toma el volumen compartido, por eso se hizo este paso, pero no debería ser necesario
+                   //sh "/liquibase/liquibase --url='${DATABASE_URL}' --username='${DATABASE_USER}' --password='${DATABASE_PASSWORD}' --changeLogFile='./liquibase/changelog-master.xml' --driver='com.informix.jdbc.IfxDriver' --classpath='/liquibase/lib/jdbc-4.50.1.jar' update"
+                    sh 'pwd'
+                    sh 'ls -la'
+                    //sh 'rm  -Rf notificaciones-liquibase'
+                    sh 'rm  -Rf notificaciones-db.jar'
+                    sh 'pwd'
+                    sh 'ls -la'
+                    dir("notificaciones-liquibase"){
+                         sh 'pwd'
+                        sh 'ls -la'  
+                    }       
+                    dir("notificaciones-liquibase/changelogs"){
+                         sh 'pwd'
+                        sh 'ls -la'  
+                    }
+                    
+                      dir("liquibase"){
+                         sh 'pwd'
+                        sh 'ls -la'  
+                    }
+                        dir("liquibase/lib"){
+                         sh 'pwd'
+                        sh 'ls -la'  
+                    }
+                    
+                    
+                     sh "/liquibase/liquibase --url='${DATABASE_URL}' --username='${DATABASE_USER}' --password='${DATABASE_PASSWORD}' --changeLogFile='./${BITBUCKET_PATH}-liquibase/changelog-master.xml' --driver='com.informix.jdbc.IfxDriver' --classpath='${WORKSPACE}/jdbc-4.50.1.jar' update"
+                }
+            }
+        }
+        
+        stage("Clean workspace"){
+            steps{
+                script{
+                    sh "rm -rf ./liquibase META-INF"
+                    sh "rm -rf ./${artifactId}-db.jar"
+                    sh "ls -lrt"
+                }
+            }
+        }
+    }
+}
+
+def String setArtifactVersion(boolean isSnapshot){
+    if(isSnapshot){
+        //obtiene la última versión SNAPSHOT
+        currentDevVersion=sh(script: "git tag --sort=-creatordate  | grep SNAPSHOT | head -n1", returnStdout: true).trim()
+        sh "echo currentDevVersion: ${currentDevVersion}"
+        CURRENT_DEV_VERSION_BITS=currentDevVersion.split("\\-")
+        CURRENT_DEV_VERSION_FIRST_PART=CURRENT_DEV_VERSION_BITS[0]
+        CURRENT_DEV_VERSION_SNAPSHOT_PART=CURRENT_DEV_VERSION_BITS[1]
+
+        return "${CURRENT_DEV_VERSION_FIRST_PART}-${params.AMBIENTE}-${CURRENT_DEV_VERSION_SNAPSHOT_PART}"
+        
+    }else{
+        //obtiene la última versión RC
+        return sh(script: "git tag --sort=-creatordate  | grep RC | head -n1", returnStdout: true).trim()
+    }
+     sh "echo setArtifactVersion:  artifactVersion: ${artifactVersion}"
+}
+
